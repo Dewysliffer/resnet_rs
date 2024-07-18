@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Union
 import tensorflow as tf
 from absl import logging
 from packaging import version
-from resnet_rs.cbam import CBAMBlock
+from cbam import CBAMBlock
 # Keras has been moved to separate repository in 2.9
 if version.parse(tf.__version__) < version.parse("2.8"):
     from tensorflow.python.keras.applications import imagenet_utils
@@ -19,8 +19,8 @@ else:
 
 from tensorflow.python.lib.io import file_io
 
-from resnet_rs.block_args import BLOCK_ARGS
-from resnet_rs.model_utils import (
+from block_args import BLOCK_ARGS
+from model_utils import (
     allow_bigger_recursion,
     fixed_padding,
     get_survival_probability,
@@ -63,19 +63,16 @@ def Conv2DFixedPadding(filters, kernel_size, strides, name):
     return apply
 
 
-def STEM(bn_momentum: float, bn_epsilon: float, activation: str):
+def STEM(bn_epsilon: float, activation: str):
     """ResNet-D type STEM block."""
 
     def apply(inputs):
-        bn_axis = 3 if tf.keras.backend.image_data_format() == "channels_last" else 1
 
         # First stem block
         x = Conv2DFixedPadding(
             filters=32, kernel_size=3, strides=2, name="stem_conv_1"
         )(inputs)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name="stem_batch_norm_1",
         )(x)
@@ -86,8 +83,6 @@ def STEM(bn_momentum: float, bn_epsilon: float, activation: str):
             filters=32, kernel_size=3, strides=1, name="stem_conv_2"
         )(x)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name="stem_batch_norm_2",
         )(x)
@@ -98,8 +93,6 @@ def STEM(bn_momentum: float, bn_epsilon: float, activation: str):
             filters=64, kernel_size=3, strides=1, name="stem_conv_3"
         )(x)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name="stem_batch_norm_3",
         )(x)
@@ -110,8 +103,6 @@ def STEM(bn_momentum: float, bn_epsilon: float, activation: str):
             filters=64, kernel_size=3, strides=2, name="stem_conv_4"
         )(x)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name="stem_batch_norm_4",
         )(x)
@@ -126,7 +117,6 @@ def BottleneckBlock(
     filters: int,
     strides: int,
     use_projection: bool,
-    bn_momentum: float,
     bn_epsilon: float,
     activation: str,
     se_ratio: float,
@@ -135,7 +125,7 @@ def BottleneckBlock(
 ):
 
     def apply(inputs):
-        bn_axis = 3 if tf.keras.backend.image_data_format() == "channels_last" else 1
+        # bn_axis = 3 if tf.keras.backend.image_data_format() == "channels_last" else 1
 
         shortcut = inputs
 
@@ -163,8 +153,6 @@ def BottleneckBlock(
                 )(inputs)
 
             shortcut = tf.keras.layers.LayerNormalization(
-                axis=bn_axis,
-                momentum=bn_momentum,
                 epsilon=bn_epsilon,
                 name=name + "projection_batch_norm",
             )(shortcut)
@@ -174,8 +162,6 @@ def BottleneckBlock(
             filters=filters, kernel_size=1, strides=1, name=name + "conv_1"
         )(inputs)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name=name + "layer_norm_1",
         )(x)
@@ -186,8 +172,6 @@ def BottleneckBlock(
             filters=filters, kernel_size=3, strides=strides, name=name + "conv_2"
         )(x)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name=name + "layer_norm_2",
         )(x)
@@ -198,8 +182,6 @@ def BottleneckBlock(
             filters=filters * 4, kernel_size=1, strides=1, name=name + "conv_3"
         )(x)
         x = tf.keras.layers.LayerNormalization(
-            axis=bn_axis,
-            momentum=bn_momentum,
             epsilon=bn_epsilon,
             name=name + "layer_norm_3",
         )(x)
@@ -227,7 +209,6 @@ def BlockGroup(
     strides,
     se_ratio,
     bn_epsilon,
-    bn_momentum,
     num_repeats,
     activation,
     survival_probability: float,
@@ -243,7 +224,6 @@ def BlockGroup(
             use_projection=True,
             se_ratio=se_ratio,
             bn_epsilon=bn_epsilon,
-            bn_momentum=bn_momentum,
             activation=activation,
             survival_probability=survival_probability,
             name=name + "block_0_",
@@ -257,7 +237,6 @@ def BlockGroup(
                 se_ratio=se_ratio,
                 activation=activation,
                 bn_epsilon=bn_epsilon,
-                bn_momentum=bn_momentum,
                 survival_probability=survival_probability,
                 name=name + f"block_{i}_",
             )(x)
@@ -269,7 +248,6 @@ def BlockGroup(
 def ResNetRS(
     depth: int,
     input_shape=(None, None, 3),
-    bn_momentum=0.99,  # 原始仓库使用EMA和bn_momentum=0
     bn_epsilon=1e-5,
     activation: str = "relu",
     se_ratio=0.25,
@@ -356,7 +334,7 @@ def ResNetRS(
             img_input = input_tensor
 
     # Build stem
-    x = STEM(bn_momentum=bn_momentum, bn_epsilon=bn_epsilon, activation=activation)(
+    x = STEM(bn_epsilon=bn_epsilon, activation=activation)(
         img_input
     )
 
@@ -377,7 +355,6 @@ def ResNetRS(
             strides=(1 if i == 0 else 2),
             num_repeats=args["num_repeats"],
             se_ratio=se_ratio,
-            bn_momentum=bn_momentum,
             bn_epsilon=bn_epsilon,
             survival_probability=survival_probability,
             name=f"c{i + 2}_",
